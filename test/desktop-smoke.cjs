@@ -32,9 +32,9 @@ async function main() {
   await page.locator('[data-add-action]').nth(1).click();
   await page.locator('[name="action-type"]').nth(2).selectOption('open_url');
   await page.fill('[name="url"]', 'https://example.com/reading');
-  await page.click('#save-editor'); await page.waitForSelector('#editor:not([open])');
+  await page.click('#save-editor'); await page.waitForSelector('#editor', { state: 'hidden' });
   assert.equal(await page.locator('.task-card').count(), 1);
-  await page.locator('[data-command="edit"]').click(); await page.fill('[name="title"]', '晚上读书，留一点时间给自己'); await page.click('#save-editor'); await page.waitForSelector('#editor:not([open])');
+  await page.locator('[data-command="edit"]').click(); await page.fill('[name="title"]', '晚上读书，留一点时间给自己'); await page.click('#save-editor'); await page.waitForSelector('#editor', { state: 'hidden' });
   assert.match(await page.locator('.task-title').innerText(), /留一点时间给自己/);
   const saved = JSON.parse(fs.readFileSync(path.join(dir, 'what2do.json'))); assert.equal(saved.tasks[0].reminders.length, 2); assert.equal(saved.tasks[0].reminders[1].actions.length, 2);
   await page.locator('[data-command="complete"]').click(); await page.waitForSelector('#stat-done:text("1")');
@@ -42,7 +42,7 @@ async function main() {
   await page.locator('[data-command="complete"]').click(); await page.click('#confirm-yes'); await page.click('[data-filter="pending"]');
   await page.click('[data-view="settings"]'); await page.click('#add-model');
   await page.fill('[name="name"]', '本地测试模型'); await page.fill('[name="baseUrl"]', `http://127.0.0.1:${server.address().port}/v1`); await page.fill('[name="model"]', 'test-model');
-  await page.click('#save-editor'); await page.waitForSelector('#editor:not([open])');
+  await page.click('#save-editor'); await page.waitForSelector('#editor', { state: 'hidden' });
   await page.click('[data-config="test-model"]'); await page.waitForSelector('#toast:text("模型连接成功")');
   await page.click('[data-view="tasks"]');
   await page.fill('#chat-input', '提醒我读书'); await page.click('#send-chat'); await page.waitForSelector('.assistant:text("你想在哪一天")');
@@ -70,7 +70,17 @@ async function main() {
   await desktop.firstWindow();
   console.log('Desktop smoke passed: manual CRUD, multi-reminder actions, model config, real AI HTTP/IPC, clarification, automatic creation, XSS escaping, tray lifecycle.');
 }
-main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
+const watchdog = setTimeout(() => { console.error('Desktop smoke timed out after 180 seconds'); process.exit(1); }, 180000);
+watchdog.unref();
+main().catch(async error => {
+  console.error(error); process.exitCode = 1;
+  if (desktop) {
+    fs.mkdirSync(path.join(__dirname, '../test-results'), { recursive: true });
+    const pages = desktop.windows();
+    if (pages[0]) await pages[0].screenshot({ path: path.join(__dirname, '../test-results/failure.png'), timeout: 5000 }).catch(() => {});
+  }
+}).finally(async () => {
+  clearTimeout(watchdog);
   if (desktop) await desktop.close();
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
   fs.rmSync(dir, { recursive: true, force: true });
