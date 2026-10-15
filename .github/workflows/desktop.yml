@@ -23,6 +23,8 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - name: Install Chinese fonts for desktop screenshots
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
       - run: xvfb-run --auto-servernum npm run test:desktop
       - uses: actions/upload-artifact@v4
         if: always()

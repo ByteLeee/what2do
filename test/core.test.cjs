@@ -32,7 +32,7 @@ test('同一待办支持多个时间和多个动作，按绝对时间保存', ()
   assert.equal(result.reminders.length, 2); assert.equal(result.reminders[1].actions.length, 2); assert.equal(result.reminders[1].at, '2026-10-15T10:00:00.000Z');
 });
 test('拒绝过去时间、无时区时间、空动作与重复提醒', () => {
-  for (const at of ['2026-10-14T08:00:00Z', '2026-10-15T18:00:00', 'invalid']) assert.throws(() => task({ ...basic(), reminders: [{ at, actions: [{ type: 'desktop' }] }] }, [], now));
+  for (const at of ['2026-10-14T08:00:00Z', '2026-10-15T18:00:00', '2027-02-30T18:00:00+08:00', '2027-01-01T24:00:00Z', 'invalid']) assert.throws(() => task({ ...basic(), reminders: [{ at, actions: [{ type: 'desktop' }] }] }, [], now));
   assert.throws(() => task({ ...basic(), reminders: [{ at: future, actions: [] }] }, [], now));
   const b = basic(); b.reminders.push(structuredClone(b.reminders[0])); assert.throws(() => task(b, [], now));
 });
@@ -43,6 +43,8 @@ test('浏览器动作禁止任意协议及 URL 中的账号密码', () => {
 test('模型允许本机 HTTP，远程必须 HTTPS', () => {
   assert.equal(modelUrl('http://localhost:11434/v1/'), 'http://localhost:11434/v1');
   assert.throws(() => modelUrl('http://example.com/v1'));
+  assert.throws(() => modelUrl('https://example.com/v1?api_key=secret'));
+  assert.throws(() => modelUrl('https://example.com/v1/chat/completions'));
 });
 test('执行后不允许改写或删除该提醒，仍可追加新时间', () => {
   const old = task(basic(), [], now); old.reminders[0].actions[0].status = 'sent';

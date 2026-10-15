@@ -14,11 +14,17 @@ function httpUrl(value, { local = false } = {}) {
 }
 function modelUrl(value) {
   const u = new URL(value);
+  assert(!u.search && !u.hash, 'Base URL 不支持查询参数或片段；密钥请填入 API Key');
+  assert(!u.pathname.replace(/\/$/, '').endsWith('/chat/completions'), 'Base URL 请填写接口根路径，不要包含 /chat/completions');
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
   return httpUrl(value, { local }).replace(/\/$/, '');
 }
 function iso(value, label) {
-  assert(typeof value === 'string' && /T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(value) && Number.isFinite(Date.parse(value)), `${label}需要带时区的完整时间`);
+  const match = typeof value === 'string' && value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/i);
+  assert(match && Number.isFinite(Date.parse(value)), `${label}需要带时区的完整时间`);
+  const [, year, month, day, hour, minute, second = '0'] = match;
+  const calendar = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  assert(calendar.getUTCFullYear() === Number(year) && calendar.getUTCMonth() + 1 === Number(month) && calendar.getUTCDate() === Number(day) && Number(hour) < 24 && Number(minute) < 60 && Number(second) < 60, `${label}包含不存在的日期或时间`);
   return new Date(value).toISOString();
 }
 function members(value) {
