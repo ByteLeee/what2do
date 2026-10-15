@@ -26,8 +26,13 @@ AI 会在信息完整时直接创建一个待办，附带两个提醒时间和�
 git clone https://github.com/ByteLeee/what2do.git
 cd what2do
 npm ci
+npm run setup
 npm start
 ```
+
+`npm ci` 安装 npm 依赖，`npm run setup` 显式下载/验证 Electron 桌面运行时，首次需要能访问 GitHub Releases。启动失败时先运行 `npm run doctor`，再保留 `npm start` 的完整终端输出。诊断不会读取密钥或发送网络请求。使用 Node.js 24 LTS（最低 22.12）；仓库包含 `.nvmrc`。
+
+源码启动需要本机图形桌面，不能在纯 SSH / 无头容器中显示窗口；Linux 不要使用 `sudo npm start`。启动器会清除外部 Electron 开发工具遗留的 `ELECTRON_RUN_AS_NODE`，避免把应用误当成普通 Node.js 脚本运行。应用启动日志写入用户数据目录的 `logs/startup.log`，不会清空已有待办或模型配置。
 
 第一次使用：
 

@@ -81,6 +81,24 @@
 
 ## 7. 本机运行与安装
 
+### 源码启动失败时
+
+在项目根目录执行（Node.js 24 LTS，最低 22.12）：
+
+```bash
+node --version
+npm ci
+npm run setup
+npm run doctor
+npm start
+```
+
+`npm ci` 安装依赖，`setup` 另行准备 Electron 二进制；下载需要访问 GitHub Releases。如果 npm 依赖安装成功但 Electron 下载失败，应用仍然无法启动。不要使用 `--omit=dev`，桌面运行时是开发依赖。
+
+`doctor` 会检查 Node、图形会话、Electron 依赖与二进制，完全离线，不读密钥。Linux 需要普通用户的桌面会话；服务器 SSH / 无头容器不能直接弹出窗口，也不要使用 `sudo npm start`。Windows/macOS 请在自己的桌面终端运行。
+
+保留 `npm start` 完整报错。若已进入主进程，用户数据目录中会生成 `logs/startup.log`，记录主进程启动、窗口可见、页面桥接就绪或失败阶段。待办数据不需要删除。启动器会自动清除继承的 `ELECTRON_RUN_AS_NODE`，以免 VS Code 等工具的环境变量导致 Electron 缺少 `app` API。
+
 首次可通过 `npm ci`、`npm start` 运行。安装包在 GitHub Actions 成功运行的 Artifacts 中，下载后解压外层 artifact ZIP，运行 `.exe` 或 `.dmg`。
 
 当前未配置代码签名与 macOS 公证。正式分发前需要开发者证书、签名、公证和真实双平台验收。安装后的系统通知需允许权限；系统专注模式可能隐藏通知。开发模式不开启登录启动。

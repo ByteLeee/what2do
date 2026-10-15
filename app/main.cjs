@@ -11,7 +11,24 @@ const dingtalk = require('./core/dingtalk.cjs');
 const ai = require('./core/ai.cjs');
 const entry = path.join(__dirname, 'ui/index.html');
 let win, tray, store, service, scheduler, interval, quitting = false, aiBusy = false;
+let rendererReady = false, probed = false;
 if (process.env.WHAT2DO_TEST_DATA) app.setPath('userData', process.env.WHAT2DO_TEST_DATA);
+function startupLog(event, error) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'startup.log');
+    if (fs.existsSync(file) && fs.statSync(file).size > 262144) fs.renameSync(file, `${file}.1`);
+    const detail = String(error?.message || error || '').replace(/https?:\/\/[^\s]+/gi, '[URL]').slice(0, 1200);
+    fs.appendFileSync(file, `${new Date().toISOString()} ${event} ${detail}\n`, { mode: 0o600 });
+  } catch { /* Logging must never prevent launch. */ }
+}
+process.on('uncaughtExceptionMonitor', error => startupLog('uncaught-exception', error));
+function startupProbe() {
+  if (probed || !rendererReady || !win?.isVisible() || process.env.WHAT2DO_STARTUP_PROBE !== '1' || !process.env.WHAT2DO_TEST_DATA) return;
+  probed = true;
+  fs.writeFileSync(path.join(app.getPath('userData'), 'startup-probe.json'), JSON.stringify({ platform: process.platform, arch: process.arch, bridgeReady: true, visible: true }));
+  setTimeout(() => app.quit(), 500);
+}
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 app.setAppUserModelId('com.byteleee.what2do');
@@ -23,8 +40,10 @@ function createWindow() {
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   win.webContents.session.setPermissionCheckHandler(() => false);
-  win.loadFile(entry);
-  win.once('ready-to-show', () => win.show());
+  win.webContents.on('did-fail-load', (_event, code, description) => startupLog('renderer-load-failed', `${code}: ${description}`));
+  win.webContents.on('render-process-gone', (_event, detail) => startupLog('renderer-gone', `${detail.reason}: ${detail.exitCode}`));
+  win.loadFile(entry).catch(error => { startupLog('load-file-error', error); dialog.showErrorBox('What2Do 页面加载失败', `${error.message}\n请查看用户数据目录下 logs/startup.log。`); app.quit(); });
+  win.once('ready-to-show', () => { win.show(); startupLog('window-visible'); startupProbe(); });
   win.on('close', event => { if (!quitting && tray) { event.preventDefault(); win.hide(); } });
 }
 async function seal(value) {
@@ -67,7 +86,10 @@ async function execute(task, reminder, action) {
   return dingtalk.send({ webhook: await unseal(channel.webhookCipher), secret: await unseal(channel.secretCipher), task, reminder, action, channel });
 }
 function handlers() {
-  register('snapshot', () => ({ ...store.snapshot(), runtime: { version: app.getVersion(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, platform: process.platform, loginAvailable: app.isPackaged && ['win32', 'darwin'].includes(process.platform) } }));
+  register('snapshot', () => {
+    if (!rendererReady) { rendererReady = true; startupLog('renderer-bridge-ready'); startupProbe(); }
+    return { ...store.snapshot(), runtime: { version: app.getVersion(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, platform: process.platform, loginAvailable: app.isPackaged && ['win32', 'darwin'].includes(process.platform) } };
+  });
   register('task:save', input => service.saveTask(input));
   register('task:complete', (id, completed) => service.completeTask(id, completed));
   register('task:delete', id => service.deleteTask(id));
@@ -118,6 +140,7 @@ app.on('before-quit', () => { quitting = true; clearInterval(interval); });
 app.on('window-all-closed', () => { if (!tray) app.quit(); });
 app.on('activate', () => show());
 if (singleInstance) app.whenReady().then(() => {
+  startupLog('starting', `version=${app.getVersion()} platform=${process.platform}/${process.arch} packaged=${app.isPackaged}`);
   store = new Store(path.join(app.getPath('userData'), 'what2do.json'));
   service = new Service({ store, seal, unseal, onChange: changed });
   scheduler = new Scheduler({ store, execute, onChange: changed }); scheduler.recover();
@@ -130,4 +153,4 @@ if (singleInstance) app.whenReady().then(() => {
   } catch { tray = null; }
   const tick = () => scheduler.tick().catch(() => { dialog.showErrorBox('提醒引擎异常', '无法写入提醒记录，请检查磁盘空间和数据目录权限。'); });
   interval = setInterval(tick, 1000); tick(); powerMonitor.on('resume', tick);
-}).catch(error => { dialog.showErrorBox('What2Do 无法启动', error.message); app.quit(); });
+}).catch(error => { startupLog('startup-failed', error); dialog.showErrorBox('What2Do 无法启动', `${error.message}\n请查看用户数据目录下 logs/startup.log。`); app.quit(); });
