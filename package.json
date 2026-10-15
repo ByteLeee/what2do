@@ -1,0 +1,32 @@
+{
+  "name": "what2do",
+  "version": "0.1.0",
+  "description": "用对话安排待办，在桌面上准时行动。",
+  "main": "app/main.cjs",
+  "author": "ByteLeee",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "check": "node scripts/check.cjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "test:desktop": "node test/desktop-smoke.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3",
+    "playwright": "1.64.1"
+  },
+  "build": {
+    "appId": "com.byteleee.what2do",
+    "productName": "What2Do",
+    "asar": true,
+    "files": ["app/**/*", "package.json", "LICENSE"],
+    "directories": {"output": "release", "buildResources": "build"},
+    "win": {"target": [{"target": "nsis", "arch": ["x64"]}], "icon": "build/icon.png"},
+    "nsis": {"oneClick": false, "allowToChangeInstallationDirectory": true},
+    "mac": {"target": [{"target": "dmg", "arch": ["arm64", "x64"]}], "category": "public.app-category.productivity", "icon": "build/icon.png"},
+    "linux": {"target": "dir", "icon": "build/icon.png"}
+  }
+}

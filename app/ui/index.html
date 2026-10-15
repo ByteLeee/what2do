@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>What2Do · 把事情交给时间</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-icon">w.</span><div>What2Do<small>把事情交给时间</small></div></div>
+    <div class="nav-label">我的工作台</div>
+    <nav aria-label="主导航">
+      <button class="nav active" data-view="tasks"><span>◷</span> 待办事项 <b id="nav-count">0</b></button>
+      <button class="nav" data-view="logs"><span>≋</span> 执行记录</button>
+      <button class="nav" data-view="settings"><span>⚙</span> 模型与通知</button>
+    </nav>
+    <div class="sidebar-foot"><span class="status-dot"></span> 提醒引擎运行中<small>关闭窗口后留在托盘<br>休眠或退出期间暂停提醒</small><span id="timezone"></span></div>
+  </aside>
+  <main>
+    <header class="topbar"><div><span id="date-label"></span><span class="top-separator">/</span><span id="view-label">我的待办</span></div><button class="button primary" id="new-task">＋ 新建待办</button></header>
+    <div id="error-banner" role="alert" hidden></div>
+    <section id="view-tasks" class="view">
+      <div class="page-heading"><div class="eyebrow">A LITTLE SPACE FOR WHAT MATTERS</div><h1>腾出脑袋，专注当下<span>。</span></h1><p>把要做的事说出来，剩下的交给 What2Do。</p></div>
+      <div class="workspace">
+        <div class="todo-area">
+          <div class="stats"><div><span id="stat-pending">0</span><small>进行中</small></div><div><span id="stat-today">0</span><small>今日提醒</small></div><div><span id="stat-done">0</span><small>已完成</small></div></div>
+          <div class="list-toolbar"><div class="tabs" role="group" aria-label="筛选待办"><button class="selected" data-filter="pending">进行中</button><button data-filter="completed">已完成</button><button data-filter="all">全部</button></div><input id="search" aria-label="搜索待办" placeholder="搜索待办…" type="search"></div>
+          <div id="task-list"></div>
+        </div>
+        <section class="chat-panel" aria-label="AI 待办助手">
+          <div class="chat-heading"><span class="ai-icon">✦</span><div><strong>说一说，接下来做什么</strong><small>AI 帮你整理成可以执行的待办</small></div><button id="clear-chat" class="icon-button" title="开始新对话" aria-label="开始新对话">↺</button></div>
+          <div class="model-line"><span class="status-dot"></span><select id="active-model" aria-label="当前使用的大模型"><option value="">尚未配置模型</option></select></div>
+          <div id="chat-messages" role="log" aria-live="polite"><div class="assistant welcome">你好，把要记住的事告诉我吧。<br><br>比如：明天下午 3 点交周报，提前半小时桌面提醒，到点再提醒一次。<small>信息完整后自动创建；时间不明确时会先问你。</small></div></div>
+          <div id="chat-examples"><button data-example="明天下午 3 点交周报，提前半小时桌面提醒，到点再提醒一次">◷ 多个提醒时间</button><button data-example="明天上午 10 点提醒我开会，通过钉钉通知，@所有人">↗ 钉钉群通知</button></div>
+          <form id="chat-form"><textarea id="chat-input" rows="3" maxlength="16000" aria-label="描述待办" placeholder="例如：明晚 8 点读书，提前 10 分钟提醒我…"></textarea><div class="composer-bottom"><small>Enter 发送 · Shift + Enter 换行</small><button class="send-button" id="send-chat" aria-label="发送待办描述">↑</button></div></form>
+          <div class="chat-privacy">仅在发送时，将本次对话交给所选模型。</div>
+        </section>
+      </div>
+    </section>
+    <section id="view-logs" class="view" hidden><div class="page-heading"><div class="eyebrow">EVERY ACTION, ACCOUNTED FOR</div><h1>提醒，都有迹可循。</h1><p>查看执行结果；送达未知时，核对后再手动重试。</p></div><div id="logs-list"></div></section>
+    <section id="view-settings" class="view" hidden>
+      <div class="page-heading"><div class="eyebrow">MAKE IT YOURS</div><h1>你的模型，你的提醒方式。</h1><p>接入兼容 OpenAI Chat Completions 的服务，包括本机模型。</p></div>
+      <div class="settings-grid"><section class="settings-card"><div class="section-head"><h2>大模型</h2><button class="button" id="add-model">＋ 添加模型</button></div><div id="models-list"></div><p class="hint">Base URL 填到 /v1 等服务根路径，应用自动追加 /chat/completions。API Key 不会发给其他服务。</p></section>
+      <section class="settings-card"><div class="section-head"><h2>钉钉通知渠道</h2><button class="button" id="add-channel">＋ 添加机器人</button></div><div id="channels-list"></div><p class="hint">支持 Markdown、加签、关键词与 @ 成员。待办可覆盖渠道默认的 @ 方式。测试消息不会 @ 成员。</p></section></div>
+      <section class="settings-card general"><div><h2>运行与数据</h2><p class="hint">待办保存在本机。密钥由系统加密，导出文件不包含凭据。</p></div><label class="check"><input type="checkbox" id="login-toggle">登录电脑时启动 <small id="login-hint"></small></label><button class="button" id="export-tasks">导出待办与记录</button><p class="hint full">提醒按创建时的绝对时间执行，界面按当前系统时区显示。恢复运行后补发通知；超过原定时间 15 分钟的网页动作会跳过，可在执行记录手动重试。退出应用将停止提醒。</p></section>
+    </section>
+  </main>
+  <dialog id="editor"><form id="editor-form"><div class="dialog-header"><div><div class="eyebrow" id="editor-eyebrow">CREATE A LITTLE PLAN</div><h2 id="editor-title">新建待办</h2></div><button type="button" class="icon-button" id="close-editor" aria-label="关闭">×</button></div><div id="editor-body"></div><div id="editor-error" class="form-error" role="alert" hidden></div><div class="dialog-footer"><button type="button" class="button" id="cancel-editor">取消</button><button type="submit" class="button primary" id="save-editor">保存</button></div></form></dialog>
+  <dialog id="confirm-dialog"><div class="dialog-header"><h2>确认操作</h2></div><p id="confirm-text"></p><div class="dialog-footer"><button class="button" id="confirm-no">取消</button><button class="button primary" id="confirm-yes">确认</button></div></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>
