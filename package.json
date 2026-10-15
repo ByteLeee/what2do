@@ -5,13 +5,17 @@
   "main": "app/main.cjs",
   "author": "ByteLeee",
   "license": "GPL-3.0-only",
+  "engines": {"node": ">=22.12.0"},
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/start.cjs",
+    "setup": "node scripts/start.cjs --setup",
+    "doctor": "node scripts/doctor.cjs",
     "test": "node --test test/*.test.cjs",
     "check": "node scripts/check.cjs",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "test:desktop": "node test/desktop-smoke.cjs"
+    "test:desktop": "node test/desktop-smoke.cjs",
+    "test:startup": "node test/source-startup.cjs"
   },
   "devDependencies": {
     "electron": "44.7.2",
