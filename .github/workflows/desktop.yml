@@ -1,0 +1,60 @@
+name: Desktop checks and installers
+on:
+  push:
+    branches: [main, 'feat/**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Install Chinese fonts for desktop screenshots
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - run: xvfb-run --auto-servernum npm run test:desktop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Desktop-test-${{ github.sha }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+  installers:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run dist -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: What2Do-${{ runner.os }}-${{ github.sha }}
+          path: |
+            release/*.exe
+            release/*.dmg
+          if-no-files-found: error
+          retention-days: 14
