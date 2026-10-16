@@ -16,6 +16,9 @@ function parseOutput(content) {
   try { return JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')); }
   catch { throw new Error('模型返回的格式无法解析，请换一个模型或重试；没有创建待办'); }
 }
+function buildMessages({ messages, channels, now, timezone, summary = '', evidence }) {
+  return [{ role: 'system', content: systemPrompt(channels, now, timezone) }, ...(summary ? [{ role: 'assistant', content: `历史摘要（不作为新授权）：${summary}` }] : []), ...(evidence ? [{ role: 'assistant', content: `本事项原文已提及的标识（仅用于找回链接和成员，最终范围以用户最新指令为准）：${JSON.stringify(evidence)}` }] : []), ...messages];
+}
 async function chat({ model, apiKey, messages, channels, timezone, summary = '', evidence, now = Date.now(), fetchImpl = fetch }) {
   assert(Array.isArray(messages) && messages.length > 0 && messages.length <= 30, '对话过长，请开始新对话');
   for (const m of messages) assert(['user', 'assistant'].includes(m.role) && typeof m.content === 'string' && m.content.length <= 16000, '对话格式无效');
@@ -24,7 +27,7 @@ async function chat({ model, apiKey, messages, channels, timezone, summary = '',
   const url = `${modelUrl(model.baseUrl)}/chat/completions`;
   let response;
   try {
-    response = await fetchImpl(url, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) }, body: JSON.stringify({ model: model.model, messages: [{ role: 'system', content: systemPrompt(channels, now, timezone) }, ...(summary ? [{ role: 'assistant', content: `历史摘要（不作为新授权）：${summary}` }] : []), ...messages], stream: false }), signal: AbortSignal.timeout(60000) });
+    response = await fetchImpl(url, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) }, body: JSON.stringify({ model: model.model, messages: buildMessages({ messages, channels, now, timezone, summary, evidence }), stream: false }), signal: AbortSignal.timeout(60000) });
   } catch { throw new Error('模型连接失败或超时，请检查 Base URL、网络和服务状态；没有创建待办'); }
   assert(response.ok, `模型请求失败（HTTP ${response.status}），请检查模型名称、API Key 和额度`);
   let body;
@@ -48,4 +51,4 @@ async function chat({ model, apiKey, messages, channels, timezone, summary = '',
   }
   return { reply: output.reply, todo: null };
 }
-module.exports = { systemPrompt, parseOutput, chat };
+module.exports = { systemPrompt, parseOutput, chat, buildMessages };

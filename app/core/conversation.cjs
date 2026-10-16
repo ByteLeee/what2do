@@ -3,8 +3,8 @@ const { assert, modelUrl } = require('./domain.cjs');
 const ai = require('./ai.cjs');
 // Conservative multilingual estimate; providers use different tokenizers.
 function estimate(value) { let n = 0; for (const c of value) n += c.codePointAt(0) > 127 ? 2 : 0.4; return Math.ceil(n); }
-function requestSize(messages, summary, channels, now, timezone) {
-  return estimate(ai.systemPrompt(channels, now, timezone)) + estimate(summary) + messages.reduce((n, m) => n + estimate(m.content) + 16, 0) + 64;
+function requestSize(messages, summary, channels, now, timezone, evidence) {
+  return estimate(JSON.stringify(ai.buildMessages({ messages, summary, channels, now, timezone, evidence }))) + 64;
 }
 function collectEvidence(previous, content, channels) {
   const result = { urls: [...previous.urls], refs: [...previous.refs], allowAll: previous.allowAll };
@@ -50,19 +50,19 @@ class Conversation {
     const summaryChars = Math.min(800, Math.floor(budget / 8));
     const evidence = collectEvidence(this.evidence, content, options.channels);
     const latest = { role: 'user', content: `[发送时间 ${new Date(now).toISOString()}，时区 ${options.timezone}]\n${content}` };
-    assert(requestSize([latest], '', options.channels, now, options.timezone) + summaryChars * 2 <= budget, '本条内容或渠道成员资料超过模型上下文预算，请缩短消息，或在模型设置中调大上下文窗口');
+    assert(requestSize([latest], '', options.channels, now, options.timezone, evidence) + summaryChars * 2 <= budget, '本条内容或渠道成员资料超过模型上下文预算，请缩短消息，或在模型设置中调大上下文窗口');
     let summary = this.summary, messages = [...this.messages, latest], compressed = false;
-    if (messages.length > 12 || requestSize(messages, summary, options.channels, now, options.timezone) > budget) {
+    if (messages.length > 12 || requestSize(messages, summary, options.channels, now, options.timezone, evidence) > budget) {
       let keep = Math.min(4, this.messages.length);
       // Keep whole user/assistant exchanges in the recent window.
-      while (keep > 0 && requestSize([...this.messages.slice(-keep), latest], 'x'.repeat(summaryChars * 5), options.channels, now, options.timezone) > budget) keep -= 2;
+      while (keep > 0 && requestSize([...this.messages.slice(-keep), latest], 'x'.repeat(summaryChars * 5), options.channels, now, options.timezone, evidence) > budget) keep -= 2;
       const cut = this.messages.length - Math.max(0, keep);
       assert(cut > 0, '当前消息过长，请缩短后重试');
       // A compression request is bounded too; every accepted reply was already bounded.
       summary = await summarize(this.messages.slice(0, cut), summary, { ...options, summaryChars });
       messages = [...this.messages.slice(cut), latest]; compressed = true;
     }
-    assert(requestSize(messages, summary, options.channels, now, options.timezone) <= budget, '压缩后仍超出模型预算，原对话已保留，请调大上下文窗口或开始新对话');
+    assert(requestSize(messages, summary, options.channels, now, options.timezone, evidence) <= budget, '压缩后仍超出模型预算，原对话已保留，请调大上下文窗口或开始新对话');
     const result = await ai.chat({ ...options, now, messages, summary, evidence });
     // Do not commit history if task persistence failed.
     const extra = await onResult(result);
@@ -72,7 +72,7 @@ class Conversation {
     this.messages = [...messages, { role: 'assistant', content: storedReply }]; this.summary = summary;
     if (compressed) this.compressions++;
     this.evidence = result.todo ? { urls: [], refs: [], allowAll: false } : evidence;
-    return { reply: result.reply, ...extra, context: { compressed, compressions: this.compressions, estimatedTokens: requestSize(this.messages, summary, options.channels, now, options.timezone), limit, retainedMessages: this.messages.length } };
+    return { reply: result.reply, ...extra, context: { compressed, compressions: this.compressions, estimatedTokens: requestSize(this.messages, summary, options.channels, now, options.timezone, this.evidence), limit, retainedMessages: this.messages.length } };
   }
 }
 module.exports = { Conversation, estimate, requestSize, collectEvidence };
