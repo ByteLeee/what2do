@@ -8,7 +8,7 @@ const localInput = value => { const d = new Date(value); return `${d.getFullYear
 const toISO = value => { const d = new Date(value); if (!value || !Number.isFinite(d.getTime())) throw new Error('请填写完整的提醒日期和时间'); return d.toISOString(); };
 const statusNames = { pending: '待执行', running: '执行中', sent: '已提交', retry: '等待重试', failed: '失败', unknown: '状态未知', skipped: '已跳过', superseded: '已安排重试' };
 const actionNames = { desktop: '桌面通知', dingtalk: '钉钉', open_url: '打开网页' };
-let state, currentView = 'tasks', filter = 'pending', history = [], busy = false, editorKind, editing, reminderDrafts = [], refreshId = 0, toastTimeout;
+let state, currentView = 'tasks', filter = 'pending', busy = false, editorKind, editing, reminderDrafts = [], refreshId = 0, toastTimeout;
 function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toastTimeout); toastTimeout = setTimeout(() => { $('#toast').hidden = true; }, 4500); }
 function fail(error) { toast(error.message || String(error)); }
 async function refresh() {
@@ -25,6 +25,10 @@ function view(name) {
   $('#view-label').textContent = { tasks: '我的待办', logs: '执行记录', settings: '模型与通知' }[name];
 }
 function render() {
+  const theme = state.settings.theme || 'forest';
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('what2do-theme', theme); } catch {}
+  $$('[data-theme-choice]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeChoice === theme)));
   const pending = state.tasks.filter(t => t.status === 'pending');
   $('#nav-count').textContent = pending.length; $('#stat-pending').textContent = pending.length;
   $('#stat-done').textContent = state.tasks.length - pending.length;
@@ -38,7 +42,7 @@ function render() {
   renderTasks(); renderSettings(); renderLogs();
 }
 function reminderHTML(r) {
-  return `<div class="reminder-line"><time class="${Date.parse(r.at) < Date.now() ? 'overdue' : ''}">◷ ${escape(fmt(r.at))}</time>${r.actions.map(a => `<span class="pill ${['failed', 'unknown', 'skipped', 'retry'].includes(a.status) ? 'problem' : ''}" title="${escape(a.error || '')}">${actionNames[a.type]} · ${statusNames[a.status] || '未知'}</span>`).join('')}</div>${r.actions.filter(a => a.type === 'open_url').map(a => `<div class="task-url">↗ ${escape(a.url)}</div>`).join('')}`;
+  return `<div class="reminder-line"><time class="${Date.parse(r.at) < Date.now() ? 'overdue' : ''}">◷ ${escape(fmt(r.at))}</time>${r.actions.map(a => `<span class="pill ${['failed', 'unknown', 'skipped', 'retry'].includes(a.status) ? 'problem' : ''}" title="${escape(a.error || '')}">${actionNames[a.type]}${a.type === 'dingtalk' ? ` · ${escape(mentionLabel(a))}` : ''} · ${statusNames[a.status] || '未知'}</span>`).join('')}</div>${r.actions.filter(a => a.type === 'open_url').map(a => `<div class="task-url">↗ ${escape(a.url)}</div>`).join('')}`;
 }
 function renderTasks() {
   const query = $('#search').value.trim().toLowerCase();
@@ -48,8 +52,8 @@ function renderTasks() {
   $('#task-list').innerHTML = list.length ? list.map(t => `<article class="task-card ${t.status}" data-id="${escape(t.id)}"><div class="task-top"><button class="task-check" data-command="complete" aria-label="${t.status === 'completed' ? '恢复' : '完成'} ${escape(t.title)}">${t.status === 'completed' ? '✓' : ''}</button><div class="task-content"><h3 class="task-title">${escape(t.title)}</h3>${t.notes ? `<p class="task-note">${escape(t.notes)}</p>` : ''}${t.reminders.slice().sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).map(reminderHTML).join('')}</div></div><div class="task-footer"><span>${t.dueAt ? `截止 ${escape(fmt(t.dueAt))}` : `${t.reminders.length} 个提醒时间`}</span><div>${t.status === 'pending' ? '<button data-command="edit">编辑</button>' : ''}<button data-command="detail">执行详情</button><button data-command="delete">删除</button></div></div></article>`).join('') : `<div class="empty"><div class="empty-icon">◷</div><strong>${query ? '没有找到这件事' : filter === 'completed' ? '做完的事，会留在这里' : '给下一件事，留一个时间'}</strong>${query ? '换个关键词试试。' : '可以在右侧说出来，也可以手动新建。'}</div>`;
 }
 function renderSettings() {
-  $('#models-list').innerHTML = state.settings.models.map(m => `<div class="config-item" data-id="${escape(m.id)}"><div class="config-title"><strong>${escape(m.name)}</strong>${m.id === state.settings.selectedModelId ? '<span class="pill">正在使用</span>' : ''}</div><small>${escape(m.model)} · ${m.apiKeySet ? '密钥已加密' : '未设置密钥'}</small><small>${escape(m.baseUrl)}</small><div class="config-actions"><button data-config="select">使用</button><button data-config="test-model">测试连接</button><button data-config="edit-model">编辑</button><button data-config="delete-model">删除</button></div></div>`).join('') || '<p class="hint">还没有模型。添加 API 地址、模型标识和密钥后，就可以用对话创建待办。</p>';
-  $('#channels-list').innerHTML = state.settings.channels.map(c => `<div class="config-item" data-id="${escape(c.id)}"><div class="config-title"><strong>${escape(c.name)}</strong><span class="pill">钉钉</span></div><small>${({ none: '不 @ 成员', all: '@所有人', members: `@指定成员（${c.atMobiles.length + c.atUserIds.length} 人）` })[c.atMode]} · ${c.secretSet ? '已加签' : '未加签'}${c.keyword ? ` · 关键词 ${escape(c.keyword)}` : ''}</small><div class="config-actions"><button data-config="test-channel">发送测试消息</button><button data-config="edit-channel">编辑</button><button data-config="delete-channel">删除</button></div></div>`).join('') || '<p class="hint">添加群自定义机器人后，AI 和手动待办都可以使用钉钉提醒。</p>';
+  $('#models-list').innerHTML = state.settings.models.map(m => `<div class="config-item" data-id="${escape(m.id)}"><div class="config-title"><strong>${escape(m.name)}</strong>${m.id === state.settings.selectedModelId ? '<span class="pill">正在使用</span>' : ''}</div><small>${escape(m.model)} · 上下文 ${m.contextWindow || 8192} · ${m.apiKeySet ? '密钥已加密' : '未设置密钥'}</small><small>${escape(m.baseUrl)}</small><div class="config-actions"><button data-config="select">使用</button><button data-config="test-model">测试连接</button><button data-config="edit-model">编辑</button><button data-config="delete-model">删除</button></div></div>`).join('') || '<p class="hint">还没有模型。添加 API 地址、模型标识和密钥后，就可以用对话创建待办。</p>';
+  $('#channels-list').innerHTML = state.settings.channels.map(c => `<div class="config-item" data-id="${escape(c.id)}"><div class="config-title"><strong>${escape(c.name)}</strong><span class="pill">钉钉</span></div><small>${({ none: '不 @ 成员', all: '@所有人', members: `@指定成员（${mentionCount(c)} 人）` })[c.atMode]} · 常用成员 ${(c.contacts || []).length} 人 · ${c.secretSet ? '已加签' : '未加签'}${c.keyword ? ` · 关键词 ${escape(c.keyword)}` : ''}</small><div class="config-actions"><button data-config="test-channel">发送测试消息</button><button data-config="edit-channel">编辑</button><button data-config="delete-channel">删除</button></div></div>`).join('') || '<p class="hint">添加群自定义机器人后，AI 和手动待办都可以使用钉钉提醒。</p>';
   $('#login-toggle').checked = state.settings.launchAtLogin;
   $('#login-toggle').disabled = !state.runtime.loginAvailable;
   $('#login-hint').textContent = state.runtime.loginAvailable ? '' : '安装版可用';
@@ -75,6 +79,39 @@ function confirm(message) {
 const field = (label, name, value = '', type = 'text', extra = '') => `<label class="field">${label}<input name="${name}" type="${type}" value="${escape(value)}" ${extra}></label>`;
 const options = (entries, selected) => entries.map(([value, title]) => `<option value="${escape(value)}" ${value === selected ? 'selected' : ''}>${escape(title)}</option>`).join('');
 const select = (label, name, entries, selected) => `<label class="field">${label}<select name="${name}">${options(entries, selected)}</select></label>`;
+function mentionCount(c) {
+  const mobiles = c.atMobiles || [], ids = c.atUserIds || [];
+  const matched = (c.contacts || []).filter(p => mobiles.includes(p.mobile) || ids.includes(p.userId));
+  return matched.length + mobiles.filter(v => !matched.some(p => p.mobile === v)).length + ids.filter(v => !matched.some(p => p.userId === v)).length;
+}
+function mentionLabel(a) {
+  const c = state.settings.channels.find(c => c.id === a.channelId);
+  const mode = a.atMode === 'default' ? c?.atMode || 'none' : a.atMode;
+  let result = mode === 'all' ? '@所有人' : mode === 'none' ? '不 @' : '指定成员';
+  if (mode === 'members') {
+    const mobiles = a.atMode === 'default' ? c?.atMobiles || [] : a.atMobiles || [];
+    const ids = a.atMode === 'default' ? c?.atUserIds || [] : a.atUserIds || [];
+    const matched = (c?.contacts || []).filter(p => mobiles.includes(p.mobile) || ids.includes(p.userId));
+    result = [...matched.map(p => '@' + p.name), ...mobiles.filter(v => !matched.some(p => p.mobile === v)).map(v => '@' + v), ...ids.filter(v => !matched.some(p => p.userId === v)).map(v => '@' + v)].join('、') || '未选成员';
+  }
+  return `${c?.name || '已删除渠道'} · ${a.atMode === 'default' ? '默认 ' : ''}${result}`;
+}
+function splitRefs(value) { return String(value || '').split(/[,，\s]+/).filter(Boolean); }
+function selectedContacts(parent) {
+  const checks = $$('input[data-contact]:checked', parent);
+  return { mobiles: checks.filter(c => !c.dataset.userId).map(c => c.dataset.mobile).filter(Boolean), ids: checks.map(c => c.dataset.userId).filter(Boolean) };
+}
+function contactChoices(list, mobiles = [], ids = []) {
+  return list.length ? `<div class="contact-choices">${list.map(p => `<label><input type="checkbox" data-contact data-mobile="${escape(p.mobile)}" data-user-id="${escape(p.userId)}" ${mobiles.includes(p.mobile) || ids.includes(p.userId) ? 'checked' : ''}>${escape(p.name)}<small>${escape(p.mobile || p.userId)}</small></label>`).join('')}</div>` : '<p class="hint">尚无常用成员，可在渠道设置中添加，或在下方填写一次性的手机号 / 用户 ID。</p>';
+}
+function contactLines(list) { return (list || []).map(p => `${p.name},${p.mobile || ''},${p.userId || ''}`).join('\n'); }
+function parsedContacts(value) { return String(value).split(/\r?\n/).filter(s => s.trim()).map(line => { const [name, mobile = '', userId = ''] = line.split(/[,，]/).map(v => v.trim()); return { name, mobile, userId }; }); }
+function mentionFields(a) {
+  const c = state.settings.channels.find(c => c.id === a.channelId), list = c?.contacts || [];
+  const mobiles = a.atMobiles || [], ids = a.atUserIds || [];
+  const fields = a.atMode === 'members' ? contactChoices(list, mobiles, ids) + field('其他手机号（逗号分隔）', 'atMobiles', mobiles.filter(v => !list.some(p => p.mobile === v)).join(', ')) + field('其他用户 ID（逗号分隔）', 'atUserIds', ids.filter(v => !list.some(p => p.userId === v)).join(', ')) : '';
+  return fields + `<p class="hint">本次生效：${escape(mentionLabel(a))}</p>`;
+}
 const atOptions = [['default', '遵循渠道默认'], ['none', '不 @ 成员'], ['all', '@所有人'], ['members', '@指定成员']];
 function openEditor(kind, item = null) {
   editorKind = kind; editing = item ? structuredClone(item) : null;
@@ -87,9 +124,9 @@ function openEditor(kind, item = null) {
     b.innerHTML = field('待办事项', 'title', item?.title, 'text', 'required maxlength="160" placeholder="例如：交周报"') + `<label class="field">补充说明<textarea name="notes" rows="2" maxlength="10000">${escape(item?.notes)}</textarea></label>` + field('截止时间（可选，不会自动增加提醒）', 'dueAt', item?.dueAt ? localInput(item.dueAt) : '', 'datetime-local', 'step="1"') + '<div class="section-head"><h2>提醒安排</h2><span class="hint">每个时间可执行多个动作</span></div><div id="reminders-edit"></div><button type="button" class="button" id="add-reminder">＋ 添加提醒时间</button><p class="hint">按当前系统时区填写。单次待办可以设置多个具体时间，暂不支持无限循环提醒。</p>';
     renderReminders();
   } else if (kind === 'model') {
-    b.innerHTML = field('配置名称', 'name', item?.name, 'text', 'required maxlength="80" placeholder="例如：我的模型"') + field('Base URL', 'baseUrl', item?.baseUrl || 'https://api.openai.com/v1', 'url', 'required placeholder="https://服务地址/v1"') + '<p class="hint">填写服务提供方给出的兼容接口根地址；本机服务可用 http://localhost:端口/v1。</p>' + field('模型标识', 'model', item?.model, 'text', 'required placeholder="填写服务商提供的准确模型名称"') + field(`API Key（${item?.apiKeySet ? '已保存，留空保留' : '本机服务可留空'}）`, 'apiKey', '', 'password', 'autocomplete="new-password"') + (item?.apiKeySet ? '<label class="check"><input name="clearKey" type="checkbox">清除已保存的 API Key</label>' : '') + '<p class="hint">支持兼容 OpenAI Chat Completions 的服务。不同服务的协议扩展不一定兼容，可保存后测试连接。</p>';
+    b.innerHTML = field('配置名称', 'name', item?.name, 'text', 'required maxlength="80" placeholder="例如：我的模型"') + field('Base URL', 'baseUrl', item?.baseUrl || 'https://api.openai.com/v1', 'url', 'required placeholder="https://服务地址/v1"') + '<p class="hint">填写服务提供方给出的兼容接口根地址；本机服务可用 http://localhost:端口/v1。</p>' + field('模型标识', 'model', item?.model, 'text', 'required placeholder="填写服务商提供的准确模型名称"') + field('上下文窗口（tokens，按服务商实际支持填写）', 'contextWindow', item?.contextWindow || 8192, 'number', 'min="4096" max="131072" required') + '<p class="hint">长对话会按保守估算提前压缩，为回答预留空间；这是预算估算，并非服务商的精确 token 计数。</p>' + field(`API Key（${item?.apiKeySet ? '已保存，留空保留' : '本机服务可留空'}）`, 'apiKey', '', 'password', 'autocomplete="new-password"') + (item?.apiKeySet ? '<label class="check"><input name="clearKey" type="checkbox">清除已保存的 API Key</label>' : '') + '<p class="hint">支持兼容 OpenAI Chat Completions 的服务。不同服务的协议扩展不一定兼容，可保存后测试连接。</p>';
   } else {
-    b.innerHTML = field('渠道名称', 'name', item?.name, 'text', 'required placeholder="例如：工作群" maxlength="80"') + field(`Webhook（${item?.webhookSet ? '已保存，留空保留' : '必填'}）`, 'webhook', '', 'password', `${item?.webhookSet ? '' : 'required'} placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" autocomplete="new-password"`) + field(`加签密钥 Secret（${item?.secretSet ? '已保存，留空保留' : '使用加签安全设置时填写'}）`, 'secret', '', 'password', 'placeholder="SEC…" autocomplete="new-password"') + (item?.secretSet ? '<label class="check"><input name="clearSecret" type="checkbox">清除已保存的签名密钥</label>' : '') + field('关键词（机器人安全设置要求时填写）', 'keyword', item?.keyword, 'text', 'maxlength="80"') + select('默认 @ 方式', 'atMode', atOptions.slice(1), item?.atMode || 'none') + `<div id="channel-members" ${item?.atMode === 'members' ? '' : 'hidden'}>` + field('手机号（多个用逗号分隔）', 'atMobiles', item?.atMobiles?.join(', ')) + field('用户 ID（多个用逗号分隔）', 'atUserIds', item?.atUserIds?.join(', ')) + '</div><p class="hint">仅支持钉钉群自定义机器人。请将应用配置与机器人安全设置保持一致。手机号或用户 ID 必须属于该群，不能直接填写姓名。</p>';
+    b.innerHTML = field('渠道名称', 'name', item?.name, 'text', 'required placeholder="例如：工作群" maxlength="80"') + field(`Webhook（${item?.webhookSet ? '已保存，留空保留' : '必填'}）`, 'webhook', '', 'password', `${item?.webhookSet ? '' : 'required'} placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" autocomplete="new-password"`) + field(`加签密钥 Secret（${item?.secretSet ? '已保存，留空保留' : '使用加签安全设置时填写'}）`, 'secret', '', 'password', 'placeholder="SEC…" autocomplete="new-password"') + (item?.secretSet ? '<label class="check"><input name="clearSecret" type="checkbox">清除已保存的签名密钥</label>' : '') + field('关键词（机器人安全设置要求时填写）', 'keyword', item?.keyword, 'text', 'maxlength="80"') + `<label class="field">常用成员（每行：姓名,手机号,用户ID；手机号和 ID 至少一项）<textarea name="contacts" rows="3" placeholder="小张,13800000000,\n小李,,user_li">${escape(contactLines(item?.contacts))}</textarea><small>配置后，可在提醒里勾选，也可以在对话中说“@小张”。</small></label>` + select('默认 @ 方式', 'atMode', atOptions.slice(1), item?.atMode || 'none') + `<div id="channel-members" ${item?.atMode === 'members' ? '' : 'hidden'}>` + `<div id="default-contact-choices">${contactChoices(item?.contacts || [], item?.atMobiles || [], item?.atUserIds || [])}</div>` + field('手机号（多个用逗号分隔）', 'atMobiles', (item?.atMobiles || []).filter(v => !(item?.contacts || []).some(p => p.mobile === v)).join(', ')) + field('用户 ID（多个用逗号分隔）', 'atUserIds', (item?.atUserIds || []).filter(v => !(item?.contacts || []).some(p => p.userId === v)).join(', ')) + '</div><p class="hint">仅支持钉钉群自定义机器人。请将应用配置与机器人安全设置保持一致。手机号或用户 ID 必须属于该群，不能直接填写姓名。</p>';
   }
   $('#editor').showModal();
 }
@@ -97,7 +134,7 @@ function locked(r) { return r.actions.some(a => a.status && a.status !== 'pendin
 function renderReminders() {
   $('#reminders-edit').innerHTML = reminderDrafts.map((r, index) => {
     if (locked(r)) return `<div class="saved-reminder">已执行记录（保留）${reminderHTML(r)}</div>`;
-    return `<div class="reminder-editor" data-reminder="${index}"><div class="reminder-head"><strong>提醒 ${index + 1}</strong><button type="button" data-remove-reminder="${index}">移除时间</button></div><label class="field">时间<input name="reminder-at" type="datetime-local" step="1" required value="${escape(localInput(r.at))}"></label>${r.actions.map((a, ai) => `<div class="action-editor" data-action-index="${ai}"><div class="action-heading"><select name="action-type" aria-label="提醒动作">${options(Object.entries(actionNames), a.type)}</select><button type="button" data-remove-action="${index}:${ai}">移除动作</button></div>${a.type === 'open_url' ? field('到期打开此链接', 'url', a.url, 'url', 'required placeholder="https://…"') : ''}${a.type === 'dingtalk' ? (select('发送到', 'channelId', [['', '请选择渠道'], ...state.settings.channels.map(c => [c.id, c.name])], a.channelId || '') + select('@ 方式', 'atMode', atOptions, a.atMode || 'default') + (a.atMode === 'members' ? field('手机号（逗号分隔）', 'atMobiles', Array.isArray(a.atMobiles) ? a.atMobiles.join(', ') : a.atMobiles) + field('用户 ID（逗号分隔）', 'atUserIds', Array.isArray(a.atUserIds) ? a.atUserIds.join(', ') : a.atUserIds) : '')) : ''}</div>`).join('')}<div class="actions-add"><button type="button" data-add-action="${index}">＋ 添加动作</button></div></div>`;
+    return `<div class="reminder-editor" data-reminder="${index}"><div class="reminder-head"><strong>提醒 ${index + 1}</strong><button type="button" data-remove-reminder="${index}">移除时间</button></div><label class="field">时间<input name="reminder-at" type="datetime-local" step="1" required value="${escape(localInput(r.at))}"></label>${r.actions.map((a, ai) => `<div class="action-editor" data-action-index="${ai}"><div class="action-heading"><select name="action-type" aria-label="提醒动作">${options(Object.entries(actionNames), a.type)}</select><button type="button" data-remove-action="${index}:${ai}">移除动作</button></div>${a.type === 'open_url' ? field('到期打开此链接', 'url', a.url, 'url', 'required placeholder="https://…"') : ''}${a.type === 'dingtalk' ? (select('发送到', 'channelId', [['', '请选择渠道'], ...state.settings.channels.map(c => [c.id, c.name])], a.channelId || '') + select('@ 方式', 'atMode', atOptions, a.atMode || 'default') + mentionFields(a)) : ''}</div>`).join('')}<div class="actions-add"><button type="button" data-add-action="${index}">＋ 添加动作</button></div></div>`;
   }).join('');
 }
 function readReminders() {
@@ -108,7 +145,7 @@ function readReminders() {
       const get = name => $(`[name="${name}"]`, a)?.value;
       const type = get('action-type');
       if (type === 'open_url') return { type, url: get('url') || '' };
-      if (type === 'dingtalk') return { type, channelId: get('channelId') || '', atMode: get('atMode') || 'default', atMobiles: (get('atMobiles') || '').split(/[,，\s]+/).filter(Boolean), atUserIds: (get('atUserIds') || '').split(/[,，\s]+/).filter(Boolean) };
+      if (type === 'dingtalk') return { type, channelId: get('channelId') || '', atMode: get('atMode') || 'default', atMobiles: [...new Set([...splitRefs(get('atMobiles')), ...selectedContacts(a).mobiles])], atUserIds: [...new Set([...splitRefs(get('atUserIds')), ...selectedContacts(a).ids])] };
       return { type };
     });
   });
@@ -126,7 +163,8 @@ $('#editor-body').addEventListener('click', event => {
   } catch (error) { editorError(error); }
 });
 $('#editor-body').addEventListener('change', event => {
-  if (editorKind === 'task' && ['action-type', 'atMode'].includes(event.target.name)) { try { readReminders(); renderReminders(); } catch (e) { editorError(e); } }
+  if (editorKind === 'task' && (['action-type', 'atMode', 'channelId', 'atMobiles', 'atUserIds'].includes(event.target.name) || event.target.matches('[data-contact]'))) { try { readReminders(); if (event.target.name === 'channelId') { const ri = Number(event.target.closest('[data-reminder]').dataset.reminder), ai = Number(event.target.closest('[data-action-index]').dataset.actionIndex); reminderDrafts[ri].actions[ai].atMobiles = []; reminderDrafts[ri].actions[ai].atUserIds = []; } renderReminders(); } catch (e) { editorError(e); } }
+  if (editorKind === 'channel' && event.target.name === 'contacts') { const selected = selectedContacts($('#editor-body')); $('#default-contact-choices').innerHTML = contactChoices(parsedContacts(event.target.value), [...selected.mobiles, ...splitRefs($('[name="atMobiles"]').value)], [...selected.ids, ...splitRefs($('[name="atUserIds"]').value)]); }
   if (editorKind === 'channel' && event.target.name === 'atMode') $('#channel-members').hidden = event.target.value !== 'members';
 });
 $('#editor-form').addEventListener('submit', async event => {
@@ -136,7 +174,7 @@ $('#editor-form').addEventListener('submit', async event => {
     data.id = editing?.id;
     if (editorKind === 'task') { readReminders(); await api.saveTask({ id: data.id, title: data.title, notes: data.notes, dueAt: data.dueAt ? toISO(data.dueAt) : null, reminders: reminderDrafts }); }
     if (editorKind === 'model') await api.saveModel({ ...data, clearKey: data.clearKey === 'on' });
-    if (editorKind === 'channel') await api.saveChannel({ ...data, clearSecret: data.clearSecret === 'on' });
+    if (editorKind === 'channel') { const selected = selectedContacts($('#editor-body')); await api.saveChannel({ ...data, atMobiles: [...splitRefs(data.atMobiles), ...selected.mobiles], atUserIds: [...splitRefs(data.atUserIds), ...selected.ids], clearSecret: data.clearSecret === 'on' }); }
     $('#editor').close(); await refresh(); toast('已保存');
   } catch (error) { editorError(error); } finally { $('#save-editor').disabled = false; }
 });
@@ -185,25 +223,26 @@ $('#logs-list').addEventListener('click', async event => {
 function bubble(role, content, taskId) {
   const div = document.createElement('div'); div.className = role; div.textContent = content;
   if (taskId) { const b = document.createElement('button'); b.className = 'message-task'; b.textContent = '✓ 已创建待办 · 查看与编辑'; b.onclick = () => { const t = state.tasks.find(t => t.id === taskId); if (t) openEditor('task', t); else toast('此待办已删除'); }; div.appendChild(b); }
-  $('#chat-messages').appendChild(div); $('#chat-messages').scrollTop = $('#chat-messages').scrollHeight; return div;
+  $('#chat-messages').appendChild(div);
+  while ($('#chat-messages').children.length > 60) $('#chat-messages').firstElementChild.remove(); $('#chat-messages').scrollTop = $('#chat-messages').scrollHeight; return div;
 }
 $('#chat-form').addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return;
   const content = $('#chat-input').value.trim(); if (!content) return;
   if (!state.settings.models.length) { view('settings'); openEditor('model'); return; }
-  if (history.length >= 28) { toast('对话较长，请开始新对话后继续'); return; }
   busy = true; $('#send-chat').disabled = true; $('#clear-chat').disabled = true; $('#chat-input').value = '';
-  bubble('user', content); history.push({ role: 'user', content });
+  bubble('user', content);
   const loading = bubble('assistant', '正在理解事项、时间和提醒方式…');
   try {
-    const result = await api.chat(history); loading.remove();
+    const result = await api.chat(content); loading.remove();
     await refresh(); bubble('assistant', result.reply, result.taskId);
-    if (result.taskId) { history = []; toast('待办已自动创建，可以在列表中修改'); }
-    else history.push({ role: 'assistant', content: result.reply });
-  } catch (error) { history.pop(); loading.textContent = error.message; loading.classList.add('message-error'); $('#chat-input').value = content; }
+    if (result.taskId) toast('待办已自动创建，可以在列表中修改');
+    if (result.context) $('#context-status').textContent = `${result.context.compressions ? `已自动压缩 ${result.context.compressions} 次 · ` : ''}上下文约 ${result.context.estimatedTokens} / ${result.context.limit} tokens · 历史会自动整理`;
+  } catch (error) { loading.textContent = error.message; loading.classList.add('message-error'); $('#chat-input').value = content; }
   finally { busy = false; $('#send-chat').disabled = false; $('#clear-chat').disabled = false; $('#chat-input').focus(); }
 });
 $('#chat-input').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#chat-form').requestSubmit(); } });
-$('#clear-chat').onclick = () => { if (busy) return; history = []; $('#chat-messages').replaceChildren(); bubble('assistant', '新的对话开始了。告诉我事项、时间和提醒方式吧。'); };
+$('#clear-chat').onclick = async () => { if (busy) return; try { await api.resetChat(); $('#chat-messages').replaceChildren(); $('#context-status').textContent = '新的对话 · 长对话会自动压缩'; bubble('assistant', '新的对话开始了。告诉我事项、时间和提醒方式吧。'); } catch (error) { fail(error); } };
 $$('[data-example]').forEach(button => { button.onclick = () => { $('#chat-input').value = button.dataset.example; $('#chat-input').focus(); }; });
+$$('[data-theme-choice]').forEach(button => { button.onclick = async () => { try { await api.setTheme(button.dataset.themeChoice); await refresh(); } catch (error) { fail(error); } }; });
 if (api) { api.onChange(refresh); refresh(); } else { $('#error-banner').textContent = '请通过桌面应用打开；浏览器预览不能执行提醒。'; $('#error-banner').hidden = false; }

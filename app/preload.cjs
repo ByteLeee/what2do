@@ -9,6 +9,7 @@ const invoke = channel => async (...args) => {
 contextBridge.exposeInMainWorld('what2do', {
   snapshot: invoke('snapshot'), saveTask: invoke('task:save'), completeTask: invoke('task:complete'),
   deleteTask: invoke('task:delete'), retryAction: invoke('action:retry'), chat: invoke('ai:chat'),
+  resetChat: invoke('ai:reset'), setTheme: invoke('theme:set'),
   saveModel: invoke('model:save'), selectModel: invoke('model:select'), testModel: invoke('model:test'),
   saveChannel: invoke('channel:save'), testChannel: invoke('channel:test'), deleteConfig: invoke('config:delete'),
   setLogin: invoke('login:set'), exportTasks: invoke('tasks:export'),

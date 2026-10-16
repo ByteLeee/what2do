@@ -13,6 +13,7 @@ class Store {
         if (this.state.version !== 1 || !Array.isArray(this.state.tasks) || !Array.isArray(this.state.logs) || !Array.isArray(this.state.settings?.models) || !Array.isArray(this.state.settings?.channels)) throw new Error('schema');
       } catch { throw new Error(`无法读取数据文件，请先备份并检查 ${file}；未覆盖原文件。`); }
     }
+    this.state.settings.theme ||= 'forest';
   }
   change(fn) {
     const draft = structuredClone(this.state);

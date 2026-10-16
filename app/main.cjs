@@ -9,6 +9,8 @@ const { Scheduler } = require('./core/scheduler.cjs');
 const { assert, httpUrl } = require('./core/domain.cjs');
 const dingtalk = require('./core/dingtalk.cjs');
 const ai = require('./core/ai.cjs');
+const { Conversation } = require('./core/conversation.cjs');
+const conversation = new Conversation();
 const entry = path.join(__dirname, 'ui/index.html');
 let win, tray, store, service, scheduler, interval, quitting = false, aiBusy = false;
 let rendererReady = false, probed = false;
@@ -35,7 +37,16 @@ app.setAppUserModelId('com.byteleee.what2do');
 function changed() { if (win && !win.isDestroyed()) win.webContents.send('changed'); }
 function show() { if (!win || win.isDestroyed()) createWindow(); win.show(); win.focus(); }
 function createWindow() {
-  win = new BrowserWindow({ width: 1280, height: 850, minWidth: 940, minHeight: 650, backgroundColor: '#f7f8f6', title: 'What2Do', icon: path.join(__dirname, 'ui/icon.png'), show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
+  const background = { forest: '#f7f8f6', ocean: '#f4f7fb', apricot: '#faf7f2', lavender: '#f8f6fb', night: '#171e25' }[store?.state.settings.theme] || '#f7f8f6';
+  win = new BrowserWindow({ width: 1280, height: 850, minWidth: 940, minHeight: 650, backgroundColor: background, title: 'What2Do', icon: path.join(__dirname, 'ui/icon.png'), show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
+  win.setMenuBarVisibility(false);
+  win.setAutoHideMenuBar(true);
+  if (process.platform !== 'darwin') win.removeMenu();
+  if (process.platform === 'darwin') win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.meta || input.control || input.alt) return;
+    const command = { c: 'copy', x: 'cut', v: 'paste', a: 'selectAll', z: input.shift ? 'redo' : 'undo' }[input.key.toLowerCase()];
+    if (command) { event.preventDefault(); win.webContents[command](); }
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
@@ -98,18 +109,14 @@ function handlers() {
   register('model:select', id => service.selectModel(id));
   register('channel:save', input => service.saveChannel(input));
   register('config:delete', (kind, id) => service.deleteConfig(kind, id));
-  register('ai:chat', async messages => {
+  register('ai:reset', () => { assert(!aiBusy, '请等待当前消息处理结束'); conversation.reset(); });
+  register('theme:set', theme => service.setTheme(theme));
+  register('ai:chat', async content => {
     assert(!aiBusy, 'AI 正在处理上一条消息'); aiBusy = true;
     try {
       const m = store.state.settings.models.find(m => m.id === store.state.settings.selectedModelId);
       assert(m, '请先在设置中添加并选择大模型');
-      const result = await ai.chat({ model: m, apiKey: await unseal(m.apiKeyCipher), messages, channels: store.state.settings.channels, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
-      if (result.todo) {
-        // Validate against current settings and time again after the network request.
-        const id = service.saveTask(result.todo && { ...result.todo, id: undefined });
-        return { reply: result.reply, taskId: id };
-      }
-      return { reply: result.reply };
+      return await conversation.turn(content, { model: m, apiKey: await unseal(m.apiKeyCipher), channels: store.state.settings.channels, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }, async result => result.todo ? { taskId: service.saveTask({ ...result.todo, id: undefined }) } : {});
     } finally { aiBusy = false; }
   });
   register('model:test', async id => {
@@ -140,6 +147,8 @@ app.on('before-quit', () => { quitting = true; clearInterval(interval); });
 app.on('window-all-closed', () => { if (!tray) app.quit(); });
 app.on('activate', () => show());
 if (singleInstance) app.whenReady().then(() => {
+  // No Electron-generated File/Edit/View/Developer menu. Keep only essential macOS app actions.
+  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ label: 'What2Do', submenu: [{ role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }]) : null);
   startupLog('starting', `version=${app.getVersion()} platform=${process.platform}/${process.arch} packaged=${app.isPackaged}`);
   store = new Store(path.join(app.getPath('userData'), 'what2do.json'));
   service = new Service({ store, seal, unseal, onChange: changed });
