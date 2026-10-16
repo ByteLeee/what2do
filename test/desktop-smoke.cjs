@@ -70,16 +70,12 @@ async function main() {
   }
   assert.match(await page.locator('#context-status').innerText(), /已自动压缩/);
   assert.ok(await page.locator('#chat-messages > div').count() <= 60);
-  // Seed only a channel config with dummy encrypted placeholders. No webhook is called.
-  await desktop.evaluate(async ({ app }) => {
-    const { writeFileSync, readFileSync } = require('node:fs');
-    const file = require('node:path').join(app.getPath('userData'), 'what2do.json');
-    const s = JSON.parse(readFileSync(file));
-    s.settings.channels.push({ id: 'test-channel', type: 'dingtalk', name: '测试工作群', atMode: 'all', atMobiles: [], atUserIds: [], contacts: [{ name: '小张', mobile: '13800000000', userId: 'zhang' }, { name: '小李', mobile: '13900000000', userId: 'li' }], webhookCipher: 'not-a-real-webhook', secretCipher: '' });
-    writeFileSync(file, JSON.stringify(s));
-  });
-  // Restart so the real store loads that fixture; also checks theme persistence below.
+  // Seed a channel only after shutdown; no credentials are decrypted and no webhook is called.
   await desktop.close();
+  const fixtureFile = path.join(dir, 'what2do.json');
+  const fixtureState = JSON.parse(fs.readFileSync(fixtureFile, 'utf8'));
+  fixtureState.settings.channels.push({ id: 'test-channel', type: 'dingtalk', name: '测试工作群', atMode: 'all', atMobiles: [], atUserIds: [], contacts: [{ name: '小张', mobile: '13800000000', userId: 'zhang' }, { name: '小李', mobile: '13900000000', userId: 'li' }], webhookCipher: 'not-a-real-webhook', secretCipher: '' });
+  fs.writeFileSync(fixtureFile, JSON.stringify(fixtureState));
   desktop = await electron.launch({ args: ['--no-sandbox', path.join(__dirname, '..')], env: { ...process.env, WHAT2DO_TEST_DATA: dir }, timeout: 60000 });
   const resumed = await desktop.firstWindow(); resumed.on('pageerror', error => errors.push(error.message)); await resumed.waitForSelector('#date-label:not(:empty)');
   await resumed.click('#new-task'); await resumed.fill('[name="title"]', '只提醒指定成员');

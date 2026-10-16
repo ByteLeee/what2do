@@ -46,7 +46,7 @@ class Conversation {
     assert(typeof content === 'string' && content.trim() && content.length <= 16000, '每条消息请控制在 16000 字符内');
     const now = options.now ?? Date.now();
     const limit = options.model.contextWindow || 8192;
-    const budget = limit - 2048;
+    const budget = limit - Math.min(2048, Math.floor(limit / 4));
     const summaryChars = Math.min(800, Math.floor(budget / 8));
     const evidence = collectEvidence(this.evidence, content, options.channels);
     const latest = { role: 'user', content: `[发送时间 ${new Date(now).toISOString()}，时区 ${options.timezone}]\n${content}` };
