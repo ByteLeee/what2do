@@ -16,6 +16,7 @@ const server = http.createServer(async (req, res) => {
   let output = { reply: '你想在哪一天、几点提醒？', todo: null };
   if (input.includes('连接测试')) output = { reply: '连接成功', todo: null };
   if (input.includes('周报')) output = { reply: '已安排两个提醒时间，提前半小时桌面提醒，到点再提醒一次。', todo: { title: '整理并提交本周周报', notes: '把本周完成的事情、遇到的问题和下一步计划整理好。', reminders: [20, 50].map(minutes => ({ at: new Date(Date.now() + minutes * 60000).toISOString(), actions: [{ type: 'desktop' }] })) } };
+  if (body.messages[0].content.startsWith('你是对话压缩器')) output = { summary: '当前还在补充阅读要求，没有新的待办已经创建。' };
   res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }));
 });
 async function main() {
@@ -23,6 +24,8 @@ async function main() {
   desktop = await electron.launch({ args: ['--no-sandbox', path.join(__dirname, '..')], env: { ...process.env, WHAT2DO_TEST_DATA: dir }, timeout: 60000 });
   const page = await desktop.firstWindow(); await page.waitForSelector('#date-label:not(:empty)');
   const errors = []; page.on('pageerror', error => errors.push(error.message));
+  assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMenuBarVisible()), false);
+  assert.equal(await desktop.evaluate(({ Menu }) => Menu.getApplicationMenu()), null);
   // Real preload + IPC + file persistence, not a browser-only mock.
   await page.click('#new-task'); await page.fill('[name="title"]', '晚上留一点时间读书');
   await page.fill('[name="notes"]', '读二十页，给今天留一段安静的时间。');
@@ -59,9 +62,61 @@ async function main() {
   const xss = (await page.evaluate(() => window.what2do.snapshot())).tasks.find(t => t.title.includes('<img'));
   await page.evaluate(id => window.what2do.deleteTask(id), xss.id);
   await page.waitForFunction(() => document.querySelectorAll('.task-card').length === 2);
+  // Long chats go through the actual main-process compressor instead of a client turn cap.
+  await page.click('#clear-chat'); await page.waitForSelector('#context-status:text("新的对话")');
+  for (let i = 0; i < 15; i++) {
+    await page.fill('#chat-input', `继续补充阅读计划 ${i}，时间稍后再定。`);
+    await page.click('#send-chat'); await page.waitForFunction(() => !document.querySelector('#send-chat').disabled);
+  }
+  assert.match(await page.locator('#context-status').innerText(), /已自动压缩/);
+  assert.ok(await page.locator('#chat-messages > div').count() <= 60);
+  // Seed a channel only after shutdown; no credentials are decrypted and no webhook is called.
+  await desktop.close();
+  const fixtureFile = path.join(dir, 'what2do.json');
+  const fixtureState = JSON.parse(fs.readFileSync(fixtureFile, 'utf8'));
+  fixtureState.settings.channels.push({ id: 'test-channel', type: 'dingtalk', name: '测试工作群', atMode: 'all', atMobiles: [], atUserIds: [], contacts: [{ name: '小张', mobile: '13800000000', userId: 'zhang' }, { name: '小李', mobile: '13900000000', userId: 'li' }], webhookCipher: 'not-a-real-webhook', secretCipher: '' });
+  fs.writeFileSync(fixtureFile, JSON.stringify(fixtureState));
+  desktop = await electron.launch({ args: ['--no-sandbox', path.join(__dirname, '..')], env: { ...process.env, WHAT2DO_TEST_DATA: dir }, timeout: 60000 });
+  const resumed = await desktop.firstWindow(); resumed.on('pageerror', error => errors.push(error.message)); await resumed.waitForSelector('#date-label:not(:empty)');
+  await resumed.click('#new-task'); await resumed.fill('[name="title"]', '只提醒指定成员');
+  await resumed.selectOption('[name="action-type"]', 'dingtalk');
+  await resumed.selectOption('[name="channelId"]', 'test-channel');
+  await resumed.selectOption('[name="atMode"]', 'members');
+  await resumed.locator('[data-contact][data-user-id="zhang"]').check();
+  await resumed.click('#save-editor'); await resumed.waitForSelector('#editor', { state: 'hidden' });
+  const mentionTask = (await resumed.evaluate(() => window.what2do.snapshot())).tasks.find(t => t.title === '只提醒指定成员');
+  assert.deepEqual(mentionTask.reminders[0].actions[0].atUserIds, ['zhang']);
+  assert.equal(mentionTask.reminders[0].actions[0].atMode, 'members');
+  assert.match(await resumed.locator('.task-card').filter({ hasText: '只提醒指定成员' }).innerText(), /@小张/);
+  await resumed.click('[data-view="settings"]');
+  await resumed.locator('#channels-list [data-config="edit-channel"]').click();
+  await resumed.selectOption('[name="atMode"]', 'members');
+  await resumed.locator('[data-contact][data-user-id="li"]').check();
+  await resumed.click('#save-editor'); await resumed.waitForSelector('#editor', { state: 'hidden' });
+  let savedChannel = (await resumed.evaluate(() => window.what2do.snapshot())).settings.channels[0];
+  assert.deepEqual(savedChannel.atUserIds, ['li']);
+  await resumed.locator('#channels-list [data-config="edit-channel"]').click();
+  await resumed.locator('[data-contact][data-user-id="li"]').uncheck();
+  await resumed.locator('[data-contact][data-user-id="zhang"]').check();
+  await resumed.click('#save-editor'); await resumed.waitForSelector('#editor', { state: 'hidden' });
+  savedChannel = (await resumed.evaluate(() => window.what2do.snapshot())).settings.channels[0];
+  assert.deepEqual(savedChannel.atUserIds, ['zhang']);
+  fs.mkdirSync(path.join(__dirname, '../test-results'), { recursive: true });
+  for (const theme of ['forest', 'ocean', 'apricot', 'lavender', 'night']) {
+    await resumed.click(`[data-theme-choice="${theme}"]`);
+    await resumed.waitForFunction(t => document.documentElement.dataset.theme === t, theme);
+    assert.equal((await resumed.evaluate(() => window.what2do.snapshot())).settings.theme, theme);
+    await resumed.screenshot({ path: path.join(__dirname, `../test-results/theme-${theme}.png`) });
+  }
+  await resumed.reload(); await resumed.waitForSelector('#date-label:not(:empty)');
+  assert.equal(await resumed.evaluate(() => document.documentElement.dataset.theme), 'night');
+  await resumed.click('#new-task');
+  const dialogColor = await resumed.locator('#editor').evaluate(el => getComputedStyle(el).backgroundColor);
+  assert.notEqual(dialogColor, 'rgb(255, 255, 255)'); await resumed.click('#cancel-editor');
+  await resumed.click('[data-view="tasks"]');
   assert.deepEqual(errors, []);
   fs.mkdirSync(path.join(__dirname, '../test-results'), { recursive: true });
-  await page.screenshot({ path: path.join(__dirname, '../test-results/desktop.png') });
+  await resumed.screenshot({ path: path.join(__dirname, '../test-results/desktop.png') });
   // Single instance and tray behavior are real Electron lifecycle checks.
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);

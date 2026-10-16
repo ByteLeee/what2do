@@ -83,6 +83,6 @@ function task(input, channels, now = Date.now(), old = null) {
   return result;
 }
 function emptyState() {
-  return { version: 1, tasks: [], settings: { models: [], selectedModelId: '', channels: [], launchAtLogin: false }, logs: [] };
+  return { version: 1, tasks: [], settings: { models: [], selectedModelId: '', channels: [], launchAtLogin: false, theme: 'forest' }, logs: [] };
 }
 module.exports = { assert, text, httpUrl, modelUrl, iso, members, action, task, cleanAction, emptyState };
